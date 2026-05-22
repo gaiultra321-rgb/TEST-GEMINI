@@ -12,6 +12,8 @@ interface ConfigSetupProps {
   onUpdateConfig: (newConfig: VoiceConfig) => void;
   apiStatus: ConfigCheckResponse | null;
   onCheckApi: () => void;
+  customBackendUrl: string;
+  onUpdateBackendUrl: (url: string) => void;
 }
 
 const PREBUILT_VOICES = [
@@ -22,7 +24,14 @@ const PREBUILT_VOICES = [
   { name: "Fenrir", gender: "Expressive & Friendly", accent: "Husky Distinct Male", desc: "Enthusiastic replies, ideal for creative brainstorming." }
 ];
 
-export function ConfigSetup({ config, onUpdateConfig, apiStatus, onCheckApi }: ConfigSetupProps) {
+export function ConfigSetup({ 
+  config, 
+  onUpdateConfig, 
+  apiStatus, 
+  onCheckApi,
+  customBackendUrl,
+  onUpdateBackendUrl
+}: ConfigSetupProps) {
   const [instruction, setInstruction] = useState(config.systemInstruction);
   const [showKeyInfo, setShowKeyInfo] = useState(false);
 
@@ -89,6 +98,39 @@ export function ConfigSetup({ config, onUpdateConfig, apiStatus, onCheckApi }: C
             )}
           </div>
         </div>
+      </div>
+
+      {/* Backend API Connection Option (GitHub Pages friendly) */}
+      <div className="p-4 rounded-xl border border-white/10 bg-white/[0.01]">
+        <div className="flex items-center gap-2 mb-2">
+          <Info className="w-4 h-4 text-indigo-400" />
+          <h3 className="text-xs font-semibold tracking-wider uppercase text-white/80">Static Host Connector (CORS Bridge)</h3>
+        </div>
+        <p className="text-[11px] text-white/50 leading-relaxed mb-3">
+          If you are hosting this frontend on GitHub Pages or testing statically, you can route voice processing queries to your active test backend:
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={customBackendUrl}
+            onChange={(e) => onUpdateBackendUrl(e.target.value)}
+            placeholder="e.g. http://localhost:3000 (Local running runner address)"
+            className="flex-1 bg-[#050505]/80 text-white/95 text-xs rounded-lg px-3 py-1.5 outline-none border border-white/5 focus:border-blue-500/50 transition-colors font-mono"
+            id="input-backend-url"
+          />
+          {customBackendUrl && (
+            <button
+              onClick={() => onUpdateBackendUrl("")}
+              className="text-[10px] px-2.5 py-1 rounded bg-red-950/20 text-red-350 hover:bg-red-900/40 border border-red-500/20 transition-all cursor-pointer font-semibold"
+              id="btn-clear-backend-url"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+        <span className="text-[10px] text-white/30 font-mono mt-1.5 block">
+          Current Routing Endpoint: <span className="text-blue-400 font-bold">{customBackendUrl ? `${customBackendUrl}/api` : "Local Relative API Route"}</span>
+        </span>
       </div>
 
       {/* Voice Selection Panel */}
