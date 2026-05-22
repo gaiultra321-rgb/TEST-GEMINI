@@ -1,10 +1,10 @@
-name: Local Test Server
+name: Temp Voice Chat Test Server
 
 on:
   workflow_dispatch:
     inputs:
       duration:
-        description: 'How long to keep the server active (in hours)?'
+        description: 'How long to keep the server running (in hours)?'
         required: true
         default: '1'
         type: choice
@@ -13,11 +13,10 @@ on:
           - '1'
           - '2'
           - '4'
-          - '6'
 
 jobs:
   run-server:
-    name: Run Local Voice Chat Server
+    name: Run Remote Test Server
     runs-on: ubuntu-latest
 
     steps:
@@ -39,7 +38,7 @@ jobs:
           NODE_ENV: production
         run: |
           if [ -z "$GEMINI_API_KEY" ]; then
-            echo "::warning::GEMINI_API_KEY secret is not set in your GitHub Repository secrets. The app will run in offline demo mode."
+            echo "::warning::GEMINI_API_KEY secret is not set in your GitHub Repository secrets. The app will run in offline mode!"
           else
             echo "SUCCESS: Found GEMINI_API_KEY in Repository Secrets."
           fi
@@ -54,34 +53,70 @@ jobs:
           echo "Waiting 3 seconds for backend server to bind to port 3000..."
           sleep 3
 
-      - name: Print Server Instructions
+      - name: Establish Zero-Config Secure HTTPS Tunnel
+        id: tunnel
         run: |
-          echo "### 🚀 LOCAL VOICE CHAT SERVER STARTED" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Your server has been compiled and is now running on standard port 3000:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Local URL:** \`http://localhost:3000\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Duration:** \`${{ github.event.inputs.duration }} hours\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "If you are running this custom action on a self-hosted runner or have mapped ports from your host, you can access the app at \`http://localhost:3000\` directly." >> $GITHUB_STEP_SUMMARY
+          echo "Initiating connect.pinggy.io SSH secure bridge..."
+          
+          # Establish secure visual tunnel that forwards to local port 3000
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R0:localhost:3000 qr@connect.pinggy.io > pinggy.log 2>&1 &
+          echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+          
+          # Wait for the tunnel to register and give us our custom address
+          sleep 8
+          
+          # Extract the static public HTTPS url
+          TUNNEL_URL=$(grep -o -E "https://[a-zA-Z0-9.-]+\.pinggy\.link" pinggy.log | head -n 1)
+          
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "Attempting fallback match..."
+            TUNNEL_URL=$(grep -o -E "https?://[a-zA-Z0-9.-]+" pinggy.log | head -n 1)
+          fi
+          
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "SUCCESS: Remote secure address bridged to: $TUNNEL_URL"
+            echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+            
+            # Print beautiful breakdown for user inside GitHub runs summary dashboard!
+            echo "### 🚀 SECURE TEST SERVER IS ACTIVE!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Because your frontend is hosted on a secure page (like GitHub Pages or AI Studio preview), you must match it with a secure connection to bypass your browser's security rules." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### 📋 HOW TO USE IT:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Highlight and copy this secure URL:" >> $GITHUB_STEP_SUMMARY
+            echo "   \`$TUNNEL_URL\`" >> $GITHUB_STEP_SUMMARY
+            echo "2. Open your deployed web app in your browser." >> $GITHUB_STEP_SUMMARY
+            echo "3. Scroll to **Static Host Connector (CORS Bridge)** in the settings (bottom left)." >> $GITHUB_STEP_SUMMARY
+            echo "4. Paste the copied URL into the address input and press enter." >> $GITHUB_STEP_SUMMARY
+            echo "5. Your web app is now connected to this running GitHub server! Enjoy real-time voice chat!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "- **Session Runtime Limit:** \`${{ github.event.inputs.duration }} hours\`" >> $GITHUB_STEP_SUMMARY
+            echo "- To terminate this connection early, click the red **'Cancel run'** button on the top right." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "::error::Failed to establish any secure public bridge."
+            cat pinggy.log
+            exit 1
+          fi
 
-      - name: Hold Server Active
+      - name: Keep Active
         run: |
           DURATION_HOURS=${{ github.event.inputs.duration }}
           DURATION_SECONDS=$(echo "$DURATION_HOURS * 3600" | bc -l | cut -d'.' -f1)
           
-          echo "Server running on http://localhost:3000"
-          echo "Keeping runner active for $DURATION_HOURS hour(s) ($DURATION_SECONDS seconds)..."
+          echo "Tunnel running at: $TUNNEL_URL"
+          echo "Holding GitHub Action active for $DURATION_HOURS hour(s) ($DURATION_SECONDS seconds)..."
           
-          # Sleep for requested duration
           sleep $DURATION_SECONDS
-          
-          echo "Time limit reached!"
+          echo "Time limit reached! Automatic shutdown."
 
       - name: Post-Run Cleanup
         if: always()
         run: |
-          echo "Stopping local instances..."
+          echo "Stopping runner instances and tunnels..."
+          if [ -n "$TUNNEL_PID" ]; then
+            kill $TUNNEL_PID || true
+          fi
           if [ -n "$SERVER_PID" ]; then
             kill $SERVER_PID || true
           fi
-          
