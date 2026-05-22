@@ -27,6 +27,16 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
+  const [customBackendUrl, setCustomBackendUrl] = useState<string>(() => {
+    return localStorage.getItem("custom_backend_url") || "";
+  });
+
+  const handleUpdateBackendUrl = (url: string) => {
+    const sanitizedUrl = url.trim().replace(/\/+$/, "");
+    setCustomBackendUrl(sanitizedUrl);
+    localStorage.setItem("custom_backend_url", sanitizedUrl);
+  };
+
   // Wave volume levels [0..1]
   const [userVolume, setUserVolume] = useState(0);
   const [botVolume, setBotVolume] = useState(0);
@@ -62,7 +72,8 @@ export default function App() {
   // 1. Initial configuration check on load
   const checkApiConfig = async () => {
     try {
-      const res = await fetch("/api/config-check");
+      const targetUrl = customBackendUrl ? `${customBackendUrl}/api/config-check` : "/api/config-check";
+      const res = await fetch(targetUrl);
       const data = await res.json();
       setApiStatus(data);
       if (data.status === "needs_key") {
@@ -78,6 +89,9 @@ export default function App() {
 
   useEffect(() => {
     checkApiConfig();
+  }, [customBackendUrl]);
+
+  useEffect(() => {
     return () => {
       // Invalidate live streams on unload
       teardownLiveAll();
@@ -200,9 +214,16 @@ export default function App() {
         }
       });
 
-      // Point WebSocket directly to the same host/context path
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/api/live`;
+      // Point WebSocket directly to the same host/context path or custom backend endpoint
+      let wsUrl = "";
+      if (customBackendUrl) {
+        // Change http -> ws, https -> wss
+        const baseWs = customBackendUrl.replace(/^http/, "ws");
+        wsUrl = `${baseWs}/api/live`;
+      } else {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        wsUrl = `${protocol}//${window.location.host}/api/live`;
+      }
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -421,7 +442,8 @@ export default function App() {
           text: m.text
         }));
 
-      const response = await fetch("/api/voice-chat", {
+      const targetApiUrl = customBackendUrl ? `${customBackendUrl}/api/voice-chat` : "/api/voice-chat";
+      const response = await fetch(targetApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -652,6 +674,8 @@ export default function App() {
                 onUpdateConfig={setConfig}
                 apiStatus={apiStatus}
                 onCheckApi={checkApiConfig}
+                customBackendUrl={customBackendUrl}
+                onUpdateBackendUrl={handleUpdateBackendUrl}
               />
             </div>
           </div>
