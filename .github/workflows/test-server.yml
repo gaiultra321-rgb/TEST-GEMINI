@@ -56,21 +56,34 @@ jobs:
       - name: Establish Zero-Config Secure HTTPS Tunnel
         id: tunnel
         run: |
-          echo "Initiating connect.pinggy.io SSH secure bridge..."
+          echo "Installing Cloudflare Tunnel client (no SSH key or port 22 needed)..."
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
           
-          # Establish secure visual tunnel that forwards to local port 3000
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R0:localhost:3000 qr@connect.pinggy.io > pinggy.log 2>&1 &
+          echo "Starting Cloudflare quick tunnel..."
+          ./cloudflared tunnel --url http://localhost:3000 > cf.log 2>&1 &
           echo "TUNNEL_PID=$!" >> $GITHUB_ENV
           
-          # Wait for the tunnel to register and give us our custom address
-          sleep 8
+          # Wait up to 12 seconds for registration to complete and log URL
+          sleep 12
           
-          # Extract the static public HTTPS url
-          TUNNEL_URL=$(grep -o -E "https://[a-zA-Z0-9.-]+\.pinggy\.link" pinggy.log | head -n 1)
+          # Extract trycloudflare.com url
+          TUNNEL_URL=$(grep -o -E "https://[a-zA-Z0-9.-]+\.trycloudflare\.com" cf.log | head -n 1)
           
           if [ -z "$TUNNEL_URL" ]; then
-            echo "Attempting fallback match..."
-            TUNNEL_URL=$(grep -o -E "https?://[a-zA-Z0-9.-]+" pinggy.log | head -n 1)
+            echo "Cloudflare Tunnel did not start. Attempting Localtunnel fallback..."
+            npx localtunnel --port 3000 > lt.log 2>&1 &
+            echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+            sleep 10
+            TUNNEL_URL=$(grep -o -E "https://[a-zA-Z0-9.-]+\.loca\.lt" lt.log | head -n 1)
+          fi
+
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "Localtunnel fell back. Attempting localhost.run fallback..."
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -R 80:localhost:3000 nokey@localhost.run > lt_run.log 2>&1 &
+            echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+            sleep 8
+            TUNNEL_URL=$(grep -o -E "https://[a-zA-Z0-9.-]+\.localhost\.run" lt_run.log | head -n 1)
           fi
           
           if [ -n "$TUNNEL_URL" ]; then
@@ -85,9 +98,9 @@ jobs:
             echo "#### 📋 HOW TO USE IT:" >> $GITHUB_STEP_SUMMARY
             echo "1. Highlight and copy this secure URL:" >> $GITHUB_STEP_SUMMARY
             echo "   \`$TUNNEL_URL\`" >> $GITHUB_STEP_SUMMARY
-            echo "2. Open your deployed web app in your browser." >> $GITHUB_STEP_SUMMARY
+            echo "2. Open your deployed web app in your browser (e.g. GitHub Pages or AI Studio preview)." >> $GITHUB_STEP_SUMMARY
             echo "3. Scroll to **Static Host Connector (CORS Bridge)** in the settings (bottom left)." >> $GITHUB_STEP_SUMMARY
-            echo "4. Paste the copied URL into the address input and press enter." >> $GITHUB_STEP_SUMMARY
+            echo "4. Paste the copied URL into the address input." >> $GITHUB_STEP_SUMMARY
             echo "5. Your web app is now connected to this running GitHub server! Enjoy real-time voice chat!" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "---" >> $GITHUB_STEP_SUMMARY
@@ -95,7 +108,10 @@ jobs:
             echo "- To terminate this connection early, click the red **'Cancel run'** button on the top right." >> $GITHUB_STEP_SUMMARY
           else
             echo "::error::Failed to establish any secure public bridge."
-            cat pinggy.log
+            echo "=== Cloudflare Logs ==="
+            cat cf.log || true
+            echo "=== Localtunnel Logs ==="
+            cat lt.log || true
             exit 1
           fi
 
