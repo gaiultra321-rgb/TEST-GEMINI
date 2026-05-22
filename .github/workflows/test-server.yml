@@ -1,0 +1,137 @@
+name: Temporary Live Test Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'How long to keep the server running (in hours)?'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '0.5'
+          - '1'
+          - '2'
+          - '4'
+          - '6'
+
+jobs:
+  run-server:
+    name: Run Temporary Voice Chat Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci || npm install
+
+      - name: Create SSH Key Pair (Required for secure tunneling)
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Compile and Start Application Server
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NODE_ENV: production
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "::error::GEMINI_API_KEY secret is not set in your GitHub repository. Please add it in Settings > Secrets and Variables > Actions."
+            exit 1
+          fi
+          
+          # Build frontend SPA & backend bundler
+          npm run build
+          
+          # Boot server on port 3000 in background
+          npm start &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          
+          echo "Waiting 5 seconds for local server to spin up..."
+          sleep 5
+
+      - name: Establish Fast Public Secure Tunnel
+        id: tunnel
+        run: |
+          echo "Initiating localhost.run SSH tunnel..."
+          # Start localhost.run securely in background and capture credentials
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -R 80:localhost:3000 nokey@localhost.run > tunnel.log 2>&1 &
+          echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+          
+          # Give it a few seconds to connect
+          sleep 8
+          
+          # Try to parse public URL
+          TUNNEL_URL=$(grep -o -E "https?://[a-zA-Z0-9.-]+\.localhost\.run" tunnel.log | head -n 1)
+          
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "localhost.run failed or was busy. Swapping to Pinggy.io tunnel fallback..."
+            # Fallback to Pinggy if needed (fully free ssh tunnel)
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 443 -R0:localhost:30500:localhost:3000 qr@connect.pinggy.io > tunnel.log 2>&1 &
+            echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+            sleep 8
+            TUNNEL_URL=$(grep -o -E "https?://[a-zA-Z0-9.-]+\.pinggy\.link" tunnel.log | head -n 1)
+          fi
+
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "::warning::Could not parse custom domain. Raw tunnel output:"
+            cat tunnel.log
+            # Attempt general match
+            TUNNEL_URL=$(grep -o -E "https?://[a-zA-Z0-9.-]+" tunnel.log | head -n 1)
+          fi
+
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "SUCCESS: Tunnel started at $TUNNEL_URL"
+            echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+            
+            # Print a beautiful breakdown in the GitHub Action Run Summary!
+            echo "### 🚀 TEMPORARY VOICE CHAT SERVER IS ONLINE!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Your live voice chat application with Gemini has been compiled and is securely bridged to a public address:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "➡️ **[Click here to open Voice Chat Applet]($TUNNEL_URL)**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "#### ℹ️ Session Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Configured Model:** \`Gemini 1.5 / 3.x Flash\` (Active Free Tier)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Selected Duration:** \`${{ github.event.inputs.duration }} hours\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **To shut down early:** Simply press the red **'Cancel run'** button on the top right of this GitHub page." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "::error::Failed to establish any public tunnel connection."
+            cat tunnel.log
+            exit 1
+          fi
+
+      - name: Hold Server Running
+        run: |
+          DURATION_HOURS=${{ github.event.inputs.duration }}
+          DURATION_SECONDS=$(echo "$DURATION_HOURS * 3600" | bc -l | cut -d'.' -f1)
+          
+          echo "Server running successfully at: $TUNNEL_URL"
+          echo "Keeping active for $DURATION_HOURS hour(s) ($DURATION_SECONDS seconds)..."
+          
+          # Sleep for requested duration
+          sleep $DURATION_SECONDS
+          
+          echo "Time limit reached! Shutting down server."
+
+      - name: Post-Run Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up local instances and connections..."
+          if [ -n "$TUNNEL_PID" ]; then
+            kill $TUNNEL_PID || true
+          fi
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID || true
+          fi
