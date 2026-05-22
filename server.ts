@@ -14,6 +14,17 @@ const wss = new WebSocketServer({ noServer: true });
 
 const PORT = 3000;
 
+// Set permissive CORS headers to allow connection from GitHub Pages or external hosts
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Increase request body limits to handle audio payload base64 transfers safely
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
